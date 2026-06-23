@@ -61,6 +61,7 @@ export interface AIMetadata {
   similarityScore: number;
   sentimentAnalysis: string;
   estimatedImpact: string;
+  assignedDepartment?: string;
 }
 
 export interface TimelineEvent {

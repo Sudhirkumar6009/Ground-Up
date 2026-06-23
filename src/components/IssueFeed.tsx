@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Search, 
@@ -17,6 +17,7 @@ import {
   CircleDot
 } from "lucide-react";
 import { Issue, IssueCategory, IssueSeverity, IssueStatus } from "../types";
+import L from "leaflet";
 
 interface IssueFeedProps {
   issues: Issue[];
@@ -39,16 +40,6 @@ export default function IssueFeed({
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
 
-  // Map state
-  const [hoveredWard, setHoveredWard] = useState<string | null>(null);
-
-  // Wards definition for vector GIS overview map with stunning light blue/green styling
-  const WARDS = [
-    { id: "west_ward", name: "West Ward 4", path: "M 10,120 L 10,10 L 150,10 L 120,240 Z", fill: "fill-sky-50/40 hover:fill-emerald-50/50", center: { x: 75, y: 100 } },
-    { id: "central_ward", name: "Central Ward 2", path: "M 150,10 L 290,10 L 250,220 L 120,240 Z", fill: "fill-sky-50/20 hover:fill-emerald-50/40", center: { x: 200, y: 110 } },
-    { id: "east_ward", name: "East Ward 1", path: "M 290,10 L 390,10 L 390,260 L 250,220 Z", fill: "fill-sky-50/30 hover:fill-emerald-50/50", center: { x: 320, y: 120 } }
-  ];
-
   // Filtering Logic
   const filteredIssues = issues.filter(issue => {
     if (categoryFilter !== "all" && issue.category !== categoryFilter) return false;
@@ -64,6 +55,132 @@ export default function IssueFeed({
     }
     return true;
   });
+
+  // Map state
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapInstanceRef = useRef<L.Map | null>(null);
+  const markersRef = useRef<L.Marker[]>([]);
+
+  // Initialize interactive Leaflet map
+  useEffect(() => {
+    if (!mapContainerRef.current) return;
+
+    if (!mapInstanceRef.current) {
+      // Centered on Greenwood / Seattle coordinates
+      const map = L.map(mapContainerRef.current, {
+        center: [47.605, -122.33],
+        zoom: 13,
+        zoomControl: true,
+      });
+
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        subdomains: "abcd",
+        maxZoom: 20,
+      }).addTo(map);
+
+      mapInstanceRef.current = map;
+    }
+
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+    };
+  }, []);
+
+  // Sync marks onto the map
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    // Clear previous markers
+    markersRef.current.forEach((marker) => marker.remove());
+    markersRef.current = [];
+
+    // Custom CSS style for beautiful marker pulses
+    const styleId = "leaflet-marker-pulse-style";
+    if (!document.getElementById(styleId)) {
+      const styleEl = document.createElement("style");
+      styleEl.id = styleId;
+      styleEl.innerHTML = `
+        @keyframes customMarkerPulse {
+          0% { transform: scale(0.5); opacity: 0.8; }
+          100% { transform: scale(2.2); opacity: 0; }
+        }
+        .marker-pulse-ring {
+          animation: customMarkerPulse 1.8s ease-out infinite;
+        }
+      `;
+      document.head.appendChild(styleEl);
+    }
+
+    filteredIssues.forEach((issue) => {
+      const { lat, lng } = issue.location.coordinates;
+      if (typeof lat === "number" && typeof lng === "number" && !isNaN(lat) && !isNaN(lng)) {
+        let color = "#F59E0B"; // reported orange
+        if (issue.status === IssueStatus.RESOLVED) color = "#22C55E"; // resolved green
+        else if (issue.status === IssueStatus.IN_PROGRESS) color = "#0EA5E9"; // in progress blue
+        else if (issue.status === IssueStatus.VERIFIED) color = "#10B981"; // verified emerald
+
+        const iconHtml = `
+          <div style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; pointer-events: none;">
+            <div style="position: absolute; width: 11px; height: 11px; border-radius: 50%; background-color: ${color}; border: 2px solid white; box-shadow: 0 1px 4px rgba(0,0,0,0.4); z-index: 10;"></div>
+            <div class="marker-pulse-ring" style="position: absolute; width: 22px; height: 22px; border-radius: 50%; background-color: ${color}; opacity: 0.35; z-index: 1;"></div>
+          </div>
+        `;
+
+        const divIcon = L.divIcon({
+          className: "custom-leaflet-pin",
+          html: iconHtml,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        });
+
+        const marker = L.marker([lat, lng], { icon: divIcon }).addTo(map);
+
+        marker.bindPopup(`
+          <div style="font-family: system-ui, -apple-system, sans-serif; font-size: 11px; color: #1e293b; max-width: 180px; text-align: left; padding: 2px;">
+            <div style="font-weight: 700; color: #0b2545; margin-bottom: 3.5px; font-size: 11px; line-height: 1.3;">
+              ${issue.title}
+            </div>
+            <div style="font-size: 9.5px; color: #64748b; margin-bottom: 5px; border-bottom: 1px solid #f1f5f9; padding-bottom: 4px;">
+              ${issue.location.address || "Greenwood Municipal Area"}
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="background-color: #f1f5f9; color: #475569; font-weight: 700; padding: 1px 4px; border-radius: 3px; font-size: 8.5px; text-transform: uppercase;">
+                ${issue.severity.toUpperCase()}
+              </span>
+              <span style="font-weight: 700; color: ${color}; text-transform: uppercase; font-size: 8.5px;">
+                ${issue.status.replace("_", " ")}
+              </span>
+            </div>
+          </div>
+        `, {
+          closeButton: false,
+          minWidth: 150
+        });
+
+        marker.on("click", () => {
+          onSelectIssue(issue);
+        });
+
+        markersRef.current.push(marker);
+      }
+    });
+
+    if (filteredIssues.length > 0) {
+      const coords = filteredIssues
+        .map((i) => [i.location.coordinates.lat, i.location.coordinates.lng] as [number, number])
+        .filter(([la, ln]) => typeof la === "number" && !isNaN(la) && typeof ln === "number" && !isNaN(ln));
+
+      if (coords.length > 0) {
+        const bounds = L.latLngBounds(coords);
+        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+      }
+    }
+  }, [filteredIssues, onSelectIssue]);
 
   const getSeverityStyle = (s: IssueSeverity) => {
     switch (s) {
@@ -175,116 +292,25 @@ export default function IssueFeed({
       {/* Main split-screen panel (Interactive GIS vector map + Feed) */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
         
-        {/* LEFT COLUMN: GORGEOUS FLAT SVG SECTOR MAP */}
+        {/* LEFT COLUMN: INTERACTIVE LEAFLET GIS MAP */}
         <div className="lg:col-span-5 flex flex-col rounded-xl border border-slate-100 bg-white overflow-hidden h-[540px] shadow-sm">
           <div className="bg-slate-50/50 p-4 border-b border-slate-100 flex items-center justify-between text-left">
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-[#0B2545]">GIS Mapping Feed</h3>
-              <p className="text-[10px] text-slate-400 mt-0.5">District sectors with real-time mapped pinpoints</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">Real-time GPS mapping & citizen verification pins</p>
             </div>
-            {hoveredWard && (
-              <span className="rounded bg-[#0B2545] text-white text-[10px] uppercase font-bold p-1 px-2">
-                {hoveredWard}
-              </span>
-            )}
+            <span className="rounded bg-emerald-50 text-[#10B981] border border-emerald-100 text-[9px] uppercase font-bold p-1 px-2">
+              🛰️ Live GPS
+            </span>
           </div>
 
-          <div className="flex-1 relative bg-slate-50/20 flex items-center justify-center p-3">
-            {/* SVG MAP SHAPES */}
-            <svg 
-              viewBox="0 0 400 280" 
-              className="w-full h-full max-h-[400px] stroke-slate-200 stroke-[1.5px] cursor-pointer"
-            >
-              {WARDS.map((w) => (
-                <g 
-                  key={w.id}
-                  onMouseEnter={() => setHoveredWard(w.name)}
-                  onMouseLeave={() => setHoveredWard(null)}
-                >
-                  <path 
-                    d={w.path} 
-                    className={`${w.fill} stroke-slate-200 transition-all duration-300`} 
-                  />
-                  <text 
-                    x={w.center.x} 
-                    y={w.center.y} 
-                    className="fill-[#0B2545]/40 text-[9px] font-bold text-center pointer-events-none select-none uppercase tracking-widest font-mono"
-                  >
-                    {w.name.split(" ")[0]}
-                  </text>
-                </g>
-              ))}
-
-              {/* RENDER ACTIVE INCIDENTS COORDINATE PIN drops on top of map quadrants */}
-              {filteredIssues.map((issue) => {
-                const lngStart = -122.3400;
-                const latStart = 47.6150;
-                const lngRange = 0.02;
-                const latRange = 0.02;
-
-                const x = ((issue.location.coordinates.lng - lngStart) / lngRange) * 400;
-                const y = ((latStart - issue.location.coordinates.lat) / latRange) * 280;
-
-                // Color code markers based on state
-                let colorClass = "fill-amber-500";
-                if (issue.status === IssueStatus.RESOLVED) colorClass = "fill-[#22C55E]";
-                else if (issue.status === IssueStatus.IN_PROGRESS) colorClass = "fill-sky-500";
-                else if (issue.status === IssueStatus.VERIFIED) colorClass = "fill-emerald-500";
-
-                return (
-                  <g 
-                    key={issue.id}
-                    onClick={() => onSelectIssue(issue)}
-                    className="group"
-                  >
-                    {/* Ring Pulse animation for Critical/High issues */}
-                    {(issue.severity === IssueSeverity.CRITICAL || issue.severity === IssueSeverity.HIGH) && (
-                      <circle 
-                        cx={x} 
-                        cy={y} 
-                        r="14" 
-                        className={`stroke-current ${colorClass} opacity-25 animate-ping pointer-events-none`} 
-                      />
-                    )}
-                    
-                    {/* Core pin circle */}
-                    <circle 
-                      cx={x} 
-                      cy={y} 
-                      r="6.5" 
-                      className={`${colorClass} hover:r-9 transition-all duration-300 stroke-white stroke-2 drop-shadow-sm cursor-pointer`} 
-                    />
-                    
-                    {/* Miniature hover overlay tooltip box */}
-                    <g className="opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-300">
-                      <rect 
-                        x={Math.max(10, Math.min(270, x - 60))} 
-                        y={Math.max(10, y - 48)} 
-                        width="120" 
-                        height="32" 
-                        rx="4" 
-                        className="fill-[#0B2545] stroke-[#0B2545]/20" 
-                      />
-                      <text 
-                        x={Math.max(10, Math.min(270, x - 60)) + 6}
-                        y={Math.max(10, y - 48) + 12}
-                        className="fill-white text-[9px] font-bold truncate block w-100"
-                        style={{ maxWidth: '100px' }}
-                      >
-                        {issue.title.length > 20 ? issue.title.substring(0, 18) + "..." : issue.title}
-                      </text>
-                      <text 
-                        x={Math.max(10, Math.min(270, x - 60)) + 6}
-                        y={Math.max(10, y - 48) + 24}
-                        className="fill-emerald-400 text-[8px] font-semibold"
-                      >
-                        Priority Index: {issue.priorityScore}
-                      </text>
-                    </g>
-                  </g>
-                );
-              })}
-            </svg>
+          <div className="flex-1 relative bg-slate-50/10 h-full w-full">
+            {/* Real Leaflet Map mount target element */}
+            <div 
+              ref={mapContainerRef} 
+              className="absolute inset-0 w-full h-full z-10" 
+              style={{ minHeight: "100%", minWidth: "100%" }}
+            />
           </div>
 
           <div className="p-4 border-t border-slate-100 bg-slate-50/50 grid grid-cols-4 gap-2 text-[10px] text-center font-semibold">
@@ -342,9 +368,9 @@ export default function IssueFeed({
                         </span>
                       </div>
 
-                      <div className="flex items-center gap-1 text-slate-500" title="Emergency priority rating scored by AI agents">
-                        <Zap className="h-3.5 w-3.5 text-[#22C55E]" />
-                        <span className="text-xs font-bold text-slate-700 leading-none">{issue.priorityScore} Priority Score</span>
+                      <div className="flex items-center gap-1 text-slate-400">
+                        <MapPin className="h-3 w-3 text-slate-400" />
+                        <span className="text-xs font-semibold text-slate-500 leading-none">{issue.location.ward}</span>
                       </div>
                     </div>
 

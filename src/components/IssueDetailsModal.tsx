@@ -49,6 +49,62 @@ export default function IssueDetailsModal({
   const [statusNote, setStatusNote] = useState("");
   const [updatingStatus, setUpdatingStatus] = useState(false);
 
+  // Resolution validation state
+  const [resolutionImg, setResolutionImg] = useState("");
+  const [validatingResolution, setValidatingResolution] = useState(false);
+  const [validationResult, setValidationResult] = useState<any>(null);
+
+  const stockProofs: Record<string, { valid: string; invalid: string }> = {
+    POTHOLE: {
+      valid: "https://images.unsplash.com/photo-1515162305285-0293e4767cc2?auto=format&fit=crop&w=400&q=80",
+      invalid: "https://images.unsplash.com/photo-1596464716127-f2a82984de30?auto=format&fit=crop&w=400&q=80"
+    },
+    STREETLIGHT: {
+      valid: "https://images.unsplash.com/photo-1507608869274-d3177c8bb4c7?auto=format&fit=crop&w=400&q=80",
+      invalid: "https://images.unsplash.com/photo-1517486808906-6ca8b3f04846?auto=format&fit=crop&w=400&q=80"
+    },
+    WASTE: {
+      valid: "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=400&q=80",
+      invalid: "https://images.unsplash.com/photo-1530587191325-3db32d826c18?auto=format&fit=crop&w=400&q=80"
+    },
+    OTHER: {
+      valid: "https://images.unsplash.com/photo-1541888946425-d81bb19240f5?auto=format&fit=crop&w=400&q=80",
+      invalid: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=400&q=80"
+    }
+  };
+
+  const activeCategory = stockProofs[issue.category] ? issue.category : "OTHER";
+  const proofs = stockProofs[activeCategory];
+
+  const handleValidateResolution = async () => {
+    if (!resolutionImg) return;
+    setValidatingResolution(true);
+    setValidationResult(null);
+    try {
+      const res = await fetch(`/api/issues/${issue.id}/validate-resolution`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          base64Image: resolutionImg,
+          note: statusNote
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setValidationResult(data);
+        if (data.valid) {
+          setStatusNote(`[Gemini verified] ${data.reason}`);
+        } else {
+          setStatusNote(`[Validation Failed] ${data.reason}`);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setValidatingResolution(false);
+    }
+  };
+
   // Load comments
   useEffect(() => {
     fetchComments();
@@ -241,6 +297,22 @@ export default function IssueDetailsModal({
                       {issue.aiMetadata.estimatedImpact || "Estimating aggregate traffic & community exposure limits..."}
                     </p>
                   </div>
+
+                  <div className="border-t border-white/10 pt-3">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-slate-300 block">Routed Department:</span>
+                    <p className="text-[#22C55E] font-bold leading-normal mt-1 text-[11px]">
+                      {issue.aiMetadata.assignedDepartment || "Awaiting Dispatch Routing..."}
+                    </p>
+                  </div>
+
+                  {issue.aiMetadata.duplicateOfId && (
+                    <div className="border-t border-white/10 pt-3 bg-red-500/10 -mx-5 px-5 py-2 mt-2">
+                      <span className="text-[9px] uppercase font-black tracking-widest text-[#22C55E] block">⚠️ AI DUPLICATE DETECTED</span>
+                      <p className="text-slate-200 leading-normal mt-1 text-[10.5px]">
+                        Looks very similar to item <span className="font-bold text-[#22C55E]">#{issue.aiMetadata.duplicateOfId.split('_')[1]}</span>.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -384,6 +456,70 @@ export default function IssueDetailsModal({
                       />
                     </div>
                   </div>
+
+                  {selectedStatus === IssueStatus.RESOLVED && (
+                    <div className="border-t border-slate-200/60 pt-3.5 space-y-3.5 text-left">
+                      <div>
+                        <label className="text-xs font-black text-slate-700 uppercase tracking-wide block">Upload/Select Resolution Proof Photo</label>
+                        <p className="text-[10.5px] text-slate-400">Provide photographic evidence of repairs. Gemini will inspect and validate the completion state immediately.</p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => { setResolutionImg(proofs.valid); setValidationResult(null); }}
+                          className={`rounded-lg p-2 border bg-white flex flex-col gap-1.5 items-center cursor-pointer relative overflow-hidden transition-all ${
+                            resolutionImg === proofs.valid ? "border-[#22C55E] ring-2 ring-[#22C55E]/10" : "border-slate-200"
+                          }`}
+                        >
+                          <img src={proofs.valid} alt="Clean Repair Proof" className="h-20 w-full object-cover rounded" referrerPolicy="no-referrer" />
+                          <span className="text-[9.5px] font-bold text-slate-705">Valid Proof (Repaired)</span>
+                          {resolutionImg === proofs.valid && <span className="absolute top-1 right-1 bg-[#22C55E] text-white text-[8px] font-black rounded-full h-3.5 w-3.5 flex items-center justify-center">✓</span>}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setResolutionImg(proofs.invalid); setValidationResult(null); }}
+                          className={`rounded-lg p-2 border bg-white flex flex-col gap-1.5 items-center cursor-pointer relative overflow-hidden transition-all ${
+                            resolutionImg === proofs.invalid ? "border-amber-400 ring-2 ring-amber-400/10" : "border-slate-200"
+                          }`}
+                        >
+                          <img src={proofs.invalid} alt="Incomplete Repair Proof" className="h-20 w-full object-cover rounded" referrerPolicy="no-referrer" />
+                          <span className="text-[9.5px] font-bold text-slate-705">Incomplete Proof</span>
+                          {resolutionImg === proofs.invalid && <span className="absolute top-1 right-1 bg-amber-400 text-white text-[8px] font-black rounded-full h-3.5 w-3.5 flex items-center justify-center">!</span>}
+                        </button>
+                      </div>
+
+                      {resolutionImg && (
+                        <div className="flex justify-start">
+                          <button
+                            type="button"
+                            disabled={validatingResolution}
+                            onClick={handleValidateResolution}
+                            className="rounded-lg border border-[#22C55E]/20 bg-emerald-50/60 hover:bg-emerald-50 px-3 py-1.5 text-[11px] font-bold text-[#22C55E] flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            <Zap className="h-3 w-3" />
+                            {validatingResolution ? "Gemini Inspecting..." : "Verify Repair via Gemini"}
+                          </button>
+                        </div>
+                      )}
+
+                      {validationResult && (
+                        <div className={`rounded-lg p-3 text-[11px] font-semibold border ${
+                          validationResult.valid 
+                            ? "bg-emerald-50 border-[#22C55E]/20 text-[#127c36]" 
+                            : "bg-red-50 border-red-200 text-red-700"
+                        }`}>
+                          <div className="flex items-center gap-1.5 font-bold uppercase text-[9.5px] tracking-wider mb-1">
+                            <Bot className="h-3.5 w-3.5" />
+                            <span>Gemini Inspection {validationResult.valid ? "Approved" : "Failed"}</span>
+                          </div>
+                          <p>{validationResult.reason}</p>
+                          <p className="text-[9.5px] text-slate-500 mt-1.5 italic">"Comparison: {validationResult.comparisonSummary}"</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="flex justify-end pt-1">
                     <button

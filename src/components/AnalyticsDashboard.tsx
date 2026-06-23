@@ -26,10 +26,28 @@ interface AnalyticsDashboardProps {
 export default function AnalyticsDashboard({ stats }: AnalyticsDashboardProps) {
   const [trends, setTrends] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [recalculating, setRecalculating] = useState(false);
 
   useEffect(() => {
     fetchPredictions();
   }, []);
+
+  const handleRegenerateForecasts = async () => {
+    setRecalculating(true);
+    try {
+      const res = await fetch("/api/dashboard/generate-insights", {
+        method: "POST"
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTrends(data);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setRecalculating(false);
+    }
+  };
 
   const fetchPredictions = async () => {
     try {
@@ -176,14 +194,25 @@ export default function AnalyticsDashboard({ stats }: AnalyticsDashboardProps) {
         <div className="lg:col-span-3 rounded-xl border border-slate-100 bg-[#0B2545] text-white p-5 flex flex-col justify-between h-[360px] text-left relative overflow-hidden">
           <div className="absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-[#10B981]/15 to-transparent pointer-events-none" />
 
-          <div className="space-y-1.5 relative z-10">
-            <div className="flex items-center gap-1.5">
-              <span className="rounded bg-white text-[#0B2545] p-1">
-                <Bot className="h-3 w-3" />
-              </span>
-              <span className="text-[9px] uppercase font-black tracking-widest text-[#22C55E]">Forecast Agent</span>
+          <div className="relative z-10 flex justify-between items-start w-full">
+            <div className="space-y-1">
+              <div className="flex items-center gap-1.5">
+                <span className="rounded bg-white text-[#0B2545] p-1">
+                  <Bot className="h-3 w-3" />
+                </span>
+                <span className="text-[9px] uppercase font-black tracking-widest text-[#22C55E]">Forecast Agent</span>
+              </div>
+              <h3 className="text-sm font-semibold text-slate-200 font-display mt-1">Greenwood Trends</h3>
             </div>
-            <h3 className="text-sm font-semibold text-slate-200 font-display">Greenwood Predictive Trends</h3>
+
+            <button
+              type="button"
+              onClick={handleRegenerateForecasts}
+              disabled={recalculating}
+              className="text-[10px] text-[#22C55E] hover:text-[#2ee06e] font-black tracking-wider uppercase border border-[#22C55E]/20 rounded-md px-2 py-1 bg-white/5 cursor-pointer disabled:opacity-40 transition-all self-start"
+            >
+              {recalculating ? "CALC..." : "REFRESH"}
+            </button>
           </div>
 
           {loading ? (
