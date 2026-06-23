@@ -1,0 +1,687 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { 
+  MapPin, 
+  Image as ImageIcon, 
+  Video as VideoIcon,
+  Text, 
+  Eye, 
+  Loader2, 
+  CheckCircle, 
+  Info, 
+  TrendingUp,
+  Upload
+} from "lucide-react";
+import { IssueCategory, IssueSeverity } from "../types";
+
+// High-fidelity stock images representing civic concerns
+const PRETEST_IMAGES = [
+  {
+    name: "Severe Asphalt Pothole",
+    url: "https://images.unsplash.com/photo-1515162305285-0293e4767cc2?auto=format&fit=crop&w=800&q=80",
+    category: IssueCategory.POTHOLE
+  },
+  {
+    name: "Clogged Storm Grate",
+    url: "https://images.unsplash.com/photo-1518156677180-95a2893f3e9f?auto=format&fit=crop&w=800&q=80",
+    category: IssueCategory.DRAINAGE
+  },
+  {
+    name: "Damaged Streetlamp",
+    url: "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=800&q=80",
+    category: IssueCategory.STREETLIGHT
+  },
+  {
+    name: "Waste Dump Corner",
+    url: "https://images.unsplash.com/photo-1611284446314-60a58ac0deb9?auto=format&fit=crop&w=800&q=80",
+    category: IssueCategory.WASTE
+  }
+];
+
+// Sample public safety raw videos for simulation
+const PRETEST_VIDEOS = [
+  {
+    name: "Water Main Burst Bursting",
+    url: "https://assets.mixkit.co/videos/preview/mixkit-sprinkler-watering-grass-in-the-park-34327-large.mp4",
+    category: IssueCategory.WATER_LEAK
+  },
+  {
+    name: "Heavy Traffic Swerving",
+    url: "https://assets.mixkit.co/videos/preview/mixkit-street-traffic-with-blurred-lights-at-night-34444-large.mp4",
+    category: IssueCategory.ROAD_DAMAGE
+  }
+];
+
+interface IssueReportFormProps {
+  onSubmitIssue: (issueData: {
+    title: string;
+    description: string;
+    category: string;
+    address: string;
+    coordinates: { lng: number; lat: number };
+    base64Image?: string;
+    isAnonymous: boolean;
+  }) => Promise<any>;
+  onClose: () => void;
+}
+
+export default function IssueReportForm({ onSubmitIssue, onClose }: IssueReportFormProps) {
+  const [step, setStep] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  // Form State
+  const [locationName, setLocationName] = useState("Broadway Blvd & Pine Street, Greenwood");
+  const [coords, setCoords] = useState({ lng: -122.3301, lat: 47.6075 });
+  const [selectedImage, setSelectedImage] = useState<string>("");
+  const [selectedVideo, setSelectedVideo] = useState<string>("");
+  const [mediaType, setMediaType] = useState<"image" | "video">("image");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [category, setCategory] = useState<IssueCategory>(IssueCategory.POTHOLE);
+  const [isAnonymous, setIsAnonymous] = useState(false);
+
+  // Pre-seed mock coordinates on locator grid click
+  const handleMapGridClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    // Scale standard boundaries
+    const lng = -122.3400 + (x / rect.width) * 0.02;
+    const lat = 47.6150 - (y / rect.height) * 0.02;
+    setCoords({ lng: Math.round(lng * 10000) / 10000, lat: Math.round(lat * 10000) / 10000 });
+    
+    // Reverse geocode descriptive label automatically
+    const names = ["Main Intersection Roadway", "Parkway Promenade", "East Residential Gate", "Riverdale Crossing", "Central Greenwood Bypass"];
+    const randomName = names[Math.floor(Math.random() * names.length)];
+    setLocationName(`${randomName} (Grid: ${lng.toFixed(4)}, ${lat.toFixed(4)})`);
+  };
+
+  const handleSelectSampleImage = (url: string, catSuggested: IssueCategory) => {
+    setSelectedImage(url);
+    setSelectedVideo("");
+    setCategory(catSuggested);
+    
+    if (!title) {
+      if (catSuggested === IssueCategory.POTHOLE) {
+        setTitle("Ruptured Asphalt Pothole Blocking Commuters");
+        setDescription("A large, deep pothole has cratered the lane. Vehicles swerve dangerous to avoid it, disrupting local high-density bike tracks.");
+      } else if (catSuggested === IssueCategory.DRAINAGE) {
+        setTitle("Clogged Street Storm Drain");
+        setDescription("Debris and leaf litter completely block the street drainage grate, causing minor water flooding during moderate rain.");
+      } else if (catSuggested === IssueCategory.STREETLIGHT) {
+        setTitle("Failed Double Cobra Luminaire Light");
+        setDescription("The double-standard streetlight is out. Neighborhood children playground is left in pitch black conditions past twilight.");
+      } else if (catSuggested === IssueCategory.WASTE) {
+        setTitle("Uncontrolled Waste Spill in Pathway");
+        setDescription("Sacks of garbage and plastic containers dumped on the walk lane. Creates bad smells and blocks access.");
+      }
+    }
+  };
+
+  const handleSelectSampleVideo = (url: string, catSuggested: IssueCategory) => {
+    setSelectedVideo(url);
+    setSelectedImage("");
+    setCategory(catSuggested);
+
+    if (!title) {
+      if (catSuggested === IssueCategory.WATER_LEAK) {
+        setTitle("Water Main Burst Under Roadway");
+        setDescription("Video indicates significant water pouring from joint cracks underneath the asphalt. Threat of surface wash-away.");
+      } else if (catSuggested === IssueCategory.ROAD_DAMAGE) {
+        setTitle("Dangerous Road Swerving Hazards");
+        setDescription("Active video recording of cars swerving around infrastructure craters during high occupancy night traffic.");
+      }
+    }
+  };
+
+  // Convert custom uploaded local records
+  const handleLocalImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result as string;
+        setSelectedImage(base64);
+        setSelectedVideo("");
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      // If video upload was selected, we can post selectedVideo or fall back to image
+      await onSubmitIssue({
+        title,
+        description,
+        category,
+        address: locationName,
+        coordinates: coords,
+        base64Image: selectedImage || selectedVideo || PRETEST_IMAGES[0].url,
+        isAnonymous
+      });
+      setSuccess(true);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div id="report-wizard" className="w-full rounded-2xl border border-slate-100 bg-white p-6 shadow-xl max-w-2xl mx-auto font-sans">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6 text-left">
+        <div>
+          <h2 className="text-lg font-extrabold text-[#0B2545] font-display">
+            File Municipal Issue Report
+          </h2>
+          <p className="text-xs text-slate-400 mt-1">Submit visual evidence. Analyzed standardly by asynchronous AI models.</p>
+        </div>
+        <button 
+          onClick={onClose}
+          className="rounded-lg p-1.5 px-3.5 text-xs font-bold border border-slate-200 hover:bg-slate-50 cursor-pointer text-[#0B2545] transition-colors"
+        >
+          Close
+        </button>
+      </div>
+
+      {success ? (
+        <div className="py-12 text-center text-sans">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#22C55E] text-white">
+            <CheckCircle className="h-8 w-8" />
+          </div>
+          <h3 className="text-xl font-bold text-[#0B2545] mt-6 font-display">Report Logged Successfully!</h3>
+          <p className="text-sm text-slate-500 mt-2 max-w-md mx-auto leading-relaxed">
+            Your incident has been written to the Greenwood database. The multi-agent AI pipeline is now analyzing categorization, assessing duplication, and updating the city dashboard.
+          </p>
+          <div className="flex items-center justify-center gap-2 mt-4 text-xs text-[#22C55E] font-bold">
+            <TrendingUp className="h-4 w-4" />
+            <span>+10 XP Citizen Credential Logged</span>
+          </div>
+          <div className="mt-8 flex justify-center gap-3">
+            <button
+              onClick={onClose}
+              className="rounded-lg bg-[#0B2545] px-6 py-2.5 text-sm font-semibold text-white hover:bg-[#0f345e] transition cursor-pointer"
+            >
+              Back to Feed
+            </button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit}>
+          
+          {/* Wizard step progress bubbles */}
+          <div className="mb-8 flex items-center justify-between px-4">
+            {[
+              { label: "Location", icon: MapPin },
+              { label: "Photo / Video", icon: ImageIcon },
+              { label: "Details", icon: Text },
+              { label: "Verify", icon: Eye }
+            ].map((s, idx) => {
+              const num = idx + 1;
+              const Icon = s.icon;
+              return (
+                <div key={num} className="flex flex-col items-center gap-1.5 relative">
+                  <div 
+                    className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold transition-colors ${
+                      step === num 
+                        ? "bg-[#0B2545] text-white" 
+                        : step > num ? "bg-[#22C55E]/10 text-[#22C55E]" : "bg-slate-50 border border-slate-100 text-slate-350"
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                  </div>
+                  <span className={`text-[10px] font-bold ${step === num ? "text-[#0B2545]" : "text-slate-400"}`}>
+                    {s.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <AnimatePresence mode="wait">
+            
+            {/* STEP 1: Interactive GIS Coordinates Pin-Drop */}
+            {step === 1 && (
+              <motion.div
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                className="space-y-4"
+              >
+                <div className="text-left">
+                  <label className="text-xs font-bold text-[#0B2545] uppercase tracking-wider block">Step 1 — Set Incident Coordinates</label>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Click anywhere on the interactive GIS grid below to pinpoint the infrastructure disrepair.
+                  </p>
+                </div>
+
+                <div 
+                  onClick={handleMapGridClick}
+                  className="relative h-64 w-full rounded-xl border border-slate-200 bg-slate-50 cursor-crosshair overflow-hidden"
+                >
+                  {/* Grid Lines Pattern */}
+                  <div className="absolute inset-0 bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[size:32px_32px]" />
+                  
+                  {/* Abstract Town Indicators / SVG Landmarks */}
+                  <div className="absolute top-12 left-24 text-[10px] font-bold text-slate-400/40 tracking-wider font-mono">BROAD STREET ST</div>
+                  <div className="absolute bottom-16 right-36 text-[10px] font-bold text-slate-400/40 tracking-wider font-mono">EAST PLAYGROUND</div>
+                  <div className="absolute top-32 right-12 text-[10px] font-bold text-slate-400/40 tracking-wider font-mono">RIVERDALE EXPY</div>
+
+                  {/* Marker Pin Widget */}
+                  <div 
+                    className="absolute h-8 w-8 -ml-4 -mt-8 flex items-center justify-center transition-all duration-300"
+                    style={{
+                      left: `${((coords.lng - (-122.3400)) / 0.02) * 100}%`,
+                      top: `${((47.6150 - coords.lat) / 0.02) * 100}%`
+                    }}
+                  >
+                    <MapPin className="h-6 w-6 text-[#0B2545] fill-white drop-shadow-md" />
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-[#FAFCFF] border border-slate-100 p-4 flex gap-3 text-left">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#0B2545]/5 text-[#0B2545]">
+                    <MapPin className="h-4 w-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-slate-700">Geocoded/Descriptive Address:</p>
+                    <input 
+                      type="text" 
+                      value={locationName} 
+                      onChange={(e) => setLocationName(e.target.value)}
+                      className="text-sm font-semibold text-slate-900 bg-transparent border-b border-dashed border-slate-300 mt-1 w-full outline-none focus:border-[#0B2545]" 
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setStep(2)}
+                    className="rounded-lg bg-[#0B2545] px-6 py-2.5 text-sm font-semibold text-white hover:bg-[#0f345e] transition cursor-pointer"
+                  >
+                    Proceed to Media
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+            {/* STEP 2: Stock Multi-modal test selection + local file drop */}
+            {step === 2 && (
+              <motion.div
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                className="space-y-6"
+              >
+                <div className="text-left flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-bold text-[#0B2545] uppercase tracking-wider block">Step 2 — Attach Photo or video evidence</label>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Choose an asset type to file real-time proof. Real-time media feeds optimize department prioritization.
+                    </p>
+                  </div>
+                  
+                  {/* Media type toggle */}
+                  <div className="flex rounded-lg border border-slate-200 p-0.5 bg-slate-55/40 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => { setMediaType("image"); setSelectedVideo(""); }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-bold cursor-pointer transition ${mediaType === "image" ? "bg-white text-[#0B2545] shadow-sm" : "text-slate-500"}`}
+                    >
+                      <ImageIcon className="h-3.5 w-3.5" />
+                      Photo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setMediaType("video"); setSelectedImage(""); }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-bold cursor-pointer transition ${mediaType === "video" ? "bg-white text-[#0B2545] shadow-sm" : "text-slate-500"}`}
+                    >
+                      <VideoIcon className="h-3.5 w-3.5" />
+                      Video
+                    </button>
+                  </div>
+                </div>
+
+                {mediaType === "image" ? (
+                  <div className="space-y-4">
+                    {/* Precompiled Image Palette */}
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      {PRETEST_IMAGES.map((img) => (
+                        <button
+                          key={img.name}
+                          type="button"
+                          onClick={() => handleSelectSampleImage(img.url, img.category)}
+                          className={`relative rounded-xl overflow-hidden border-2 text-left h-24 aspect-video hover:opacity-95 transition cursor-pointer ${
+                            selectedImage === img.url ? "border-[#0B2545] ring-2 ring-[#0B2545]/10 scale-95" : "border-slate-200"
+                          }`}
+                        >
+                          <img src={img.url} alt={img.name} className="h-full w-full object-cover" />
+                          <div className="absolute inset-x-0 bottom-0 bg-[#0B2545]/80 p-1">
+                            <p className="text-[9px] font-bold text-white truncate text-center">{img.name}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="text-center py-1 text-slate-350 text-[10px] font-bold tracking-widest">--- OR LOAD FILE ---</div>
+
+                    {/* Drag Drop Manual box */}
+                    <div className="rounded-xl border-2 border-dashed border-slate-200 p-6 text-center hover:border-[#0B2545] transition relative bg-[#FAFCFF]">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleLocalImageUpload}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      />
+                      <Upload className="h-6 w-6 text-slate-400 mx-auto" />
+                      <p className="text-xs font-bold text-slate-750 mt-2">Upload custom Photo</p>
+                      <p className="text-[10px] text-slate-400 mt-1">Converts to local Base64</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Precompiled Video Palette */}
+                    <div className="grid grid-cols-2 gap-3">
+                      {PRETEST_VIDEOS.map((vid) => (
+                        <button
+                          key={vid.name}
+                          type="button"
+                          onClick={() => handleSelectSampleVideo(vid.url, vid.category)}
+                          className={`relative rounded-xl overflow-hidden border-2 text-left h-32 hover:opacity-95 transition cursor-pointer flex flex-col justify-between p-3 ${
+                            selectedVideo === vid.url ? "border-[#0B2545] ring-2 ring-[#0B2545]/10 bg-slate-50" : "border-slate-200"
+                          }`}
+                        >
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#0B2545]/10 text-[#0B2545]">
+                            <VideoIcon className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-[#0B2545] truncate block">{vid.name}</span>
+                            <span className="text-[9px] text-slate-400 font-semibold block uppercase mt-0.5">MP4 simulation report</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="text-center py-1 text-slate-350 text-[10px] font-bold tracking-widest">--- OR LOAD FILE ---</div>
+
+                    {/* Drag Drop Video Box */}
+                    <div className="rounded-xl border-2 border-dashed border-slate-200 p-6 text-center hover:border-[#0B2545] transition relative bg-[#FAFCFF]">
+                      <input
+                        type="file"
+                        accept="video/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setSelectedVideo(URL.createObjectURL(file));
+                            setSelectedImage("");
+                          }
+                        }}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      />
+                      <Upload className="h-6 w-6 text-slate-400 mx-auto" />
+                      <p className="text-xs font-bold text-slate-750 mt-2">Upload custom Video MP4/MOV</p>
+                      <p className="text-[10px] text-slate-400 mt-1">Live dynamic playback preview</p>
+                    </div>
+                  </div>
+                )}
+
+                {selectedImage && (
+                  <div className="relative rounded-xl overflow-hidden h-40 max-w-sm mx-auto border border-slate-200 shadow-sm">
+                    <img src={selectedImage} alt="Selected" className="h-full w-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setSelectedImage("")}
+                      className="absolute top-2 right-2 rounded-full bg-black/60 px-2 py-1 text-[10px] font-bold text-white hover:bg-black/90 cursor-pointer"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+
+                {selectedVideo && (
+                  <div className="relative rounded-xl overflow-hidden h-44 max-w-sm mx-auto border border-slate-200 shadow-sm bg-black">
+                    <video src={selectedVideo} controls autoPlay muted loop className="h-full w-full" />
+                    <button
+                      type="button"
+                      onClick={() => setSelectedVideo("")}
+                      className="absolute top-2 right-2 rounded-full bg-black/70 px-2 py-1 text-[10px] font-bold text-white hover:bg-black/95 cursor-pointer z-10"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex justify-between pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setStep(1)}
+                    className="rounded-lg border border-slate-200 px-5 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStep(3)}
+                    className="rounded-lg bg-[#0B2545] px-5 py-2 text-sm font-semibold text-white hover:bg-[#0f345e] cursor-pointer"
+                  >
+                    Details
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+            {/* STEP 3: Incident specifications */}
+            {step === 3 && (
+              <motion.div
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                className="space-y-4 text-left"
+              >
+                <div>
+                  <label className="text-xs font-bold text-[#0B2545] uppercase tracking-wider block">Step 3 — Describe the Incident</label>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Describe details standardly. The AI pipeline evaluates municipal urgency triggers based on these cues.
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Subject Title</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Broken streetlight on West Street corner"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-[#0B2545] transition-colors"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Detailed Description</label>
+                    <textarea
+                      placeholder="Explain what needs fixing, danger posed, and any specific landmarks nearby..."
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm h-28 outline-none focus:border-[#0B2545] transition-colors resize-none"
+                      required
+                    ></textarea>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Assessed Category</label>
+                      <select
+                        value={category}
+                        onChange={(e) => setCategory(e.target.value as IssueCategory)}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none bg-white cursor-pointer hover:border-[#0B2545] transition-colors"
+                      >
+                        <option value={IssueCategory.POTHOLE}>Asphalt Pothole</option>
+                        <option value={IssueCategory.DRAINAGE}>Drainage & Floods</option>
+                        <option value={IssueCategory.STREETLIGHT}>Street Light Out</option>
+                        <option value={IssueCategory.WASTE}>Waste & Garbage Spill</option>
+                        <option value={IssueCategory.ROAD_DAMAGE}>Road Damage / Cracks</option>
+                        <option value={IssueCategory.WATER_LEAK}>Water/Pipe Leak</option>
+                        <option value={IssueCategory.OTHER}>Other Civic Concern</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-6">
+                      <input
+                        type="checkbox"
+                        id="anon-toggle"
+                        checked={isAnonymous}
+                        onChange={(e) => setIsAnonymous(e.target.checked)}
+                        className="h-4.5 w-4.5 rounded text-[#0B2545] border-slate-350 focus:ring-[#0B2545] cursor-pointer"
+                      />
+                      <label htmlFor="anon-toggle" className="text-xs font-bold text-slate-600 cursor-pointer select-none">
+                        File Anonymously
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {(selectedImage || selectedVideo) && (
+                  <div className="rounded-xl bg-teal-50/50 p-3 border border-teal-120/30 text-xs flex gap-2 text-slate-600 leading-relaxed font-medium">
+                    <Info className="h-4.5 w-4.5 text-[#22C55E] shrink-0 mt-0.5" />
+                    <span>
+                      🤖 <strong>AI Category Mapping</strong>: Submitting visual evidence triggers multi-agent diagnostic classification. Your parameters will be refined asynchronously.
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex justify-between pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setStep(2)}
+                    className="rounded-lg border border-slate-200 px-5 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!title || !description}
+                    onClick={() => setStep(4)}
+                    className="rounded-lg bg-[#0B2545] px-5 py-2 text-sm font-semibold text-white hover:bg-[#0f345e] disabled:opacity-50 cursor-pointer"
+                  >
+                    Review Final
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+            {/* STEP 4: Review and file */}
+            {step === 4 && (
+              <motion.div
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                className="space-y-4 text-left"
+              >
+                <div>
+                  <label className="text-xs font-bold text-[#0B2545] uppercase tracking-wider block">Step 4 — Final Audit Review</label>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Please confirm your details. Active reports immediately post onto the municipal stream.
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-slate-100 bg-slate-50/50 p-4 space-y-3.5 text-xs text-slate-700 leading-relaxed font-semibold">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <span className="text-slate-400 uppercase tracking-wider font-bold">Category:</span>
+                      <p className="font-bold text-[#0B2545] text-sm mt-0.5">{category.toUpperCase()}</p>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 uppercase tracking-wider font-bold">Pre-assigned Severity:</span>
+                      <p className="font-bold text-[#0B2545] text-sm mt-0.5">MEDIUM (AI refineable)</p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-slate-100 pt-2.5">
+                    <span className="text-slate-400 uppercase tracking-wider font-bold">Assigned Location:</span>
+                    <p className="font-bold text-slate-800 mt-0.5">{locationName}</p>
+                  </div>
+
+                  <div className="border-t border-slate-100 pt-2.5">
+                    <span className="text-slate-400 uppercase tracking-wider font-bold">Report Title:</span>
+                    <p className="font-bold text-slate-900 text-sm mt-0.5">{title}</p>
+                  </div>
+
+                  <div className="border-t border-slate-100 pt-2.5">
+                    <span className="text-slate-400 uppercase tracking-wider font-bold">Described Evidence:</span>
+                    <p className="text-slate-500 mt-0.5 leading-normal">{description}</p>
+                  </div>
+                </div>
+
+                {selectedImage && (
+                  <div className="flex items-center gap-2.5 rounded-xl border border-slate-100 bg-[#FAFCFF] p-2.5">
+                    <div className="h-10 w-12 overflow-hidden rounded border border-slate-150 shrink-0">
+                      <img src={selectedImage} alt="Attachment Thumbnail" className="h-full w-full object-cover" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">Photo Attachment Verified</p>
+                      <p className="text-[10px] text-slate-400">Enrolled into image classification</p>
+                    </div>
+                  </div>
+                )}
+
+                {selectedVideo && (
+                  <div className="flex items-center gap-2.5 rounded-xl border border-slate-100 bg-[#FAFCFF] p-2.5">
+                    <div className="h-10 w-12 overflow-hidden rounded border border-slate-150 shrink-0 bg-black flex items-center justify-center text-white text-[9px] font-bold">
+                      VIDEO
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">Video Evidence Captured</p>
+                      <p className="text-[10px] text-slate-400">Interactive playback stream established</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-between pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setStep(3)}
+                    className="rounded-lg border border-slate-200 px-5 py-2 text-sm font-semibold text-slate-650 hover:bg-slate-50 cursor-pointer"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={handleSubmit}
+                    className="rounded-lg bg-[#0B2545] px-6 py-2.5 text-sm font-bold text-white hover:bg-[#0f345e] flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Analyzing with AI Pipeline...
+                      </>
+                    ) : (
+                      "Submit Incident Log"
+                    )}
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+          </AnimatePresence>
+
+        </form>
+      )}
+
+    </div>
+  );
+}
