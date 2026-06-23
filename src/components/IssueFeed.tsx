@@ -17,7 +17,8 @@ import {
   CircleDot
 } from "lucide-react";
 import { Issue, IssueCategory, IssueSeverity, IssueStatus } from "../types";
-import L from "leaflet";
+import * as LNamespace from "leaflet";
+const L = (LNamespace as any).default || LNamespace;
 
 interface IssueFeedProps {
   issues: Issue[];
